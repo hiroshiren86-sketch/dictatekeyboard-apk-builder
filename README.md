@@ -46,6 +46,7 @@ DevEmperor publica tag (ej. v6.1.0)
 | `KEYSTORE_PASSWORD` | Contraseña del keystore (store y key) |
 | `KEYSTORE_ALIAS` | Alias de la clave (`dictatekeyboard`) |
 | `DISCORD_WEBHOOK_URL` | *Opcional* — webhook de Discord para avisos |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | *Opcional* — aviso por Telegram (chat privado con un bot) |
 
 Ningún material sensible vive en el código: el keystore y sus contraseñas están solo en los **Secrets cifrados de GitHub**. Este repo es público a propósito: en repos públicos Actions es gratis e ilimitado; en uno privado, el cron de 15 min (≈2.900 min/mes) agotaría los 2.000 minutos gratis del plan y la vigilancia moriría a mitad de mes.
 

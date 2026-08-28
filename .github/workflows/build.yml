@@ -185,6 +185,28 @@ jobs:
           curl -sf -X POST -H 'Content-Type: application/json' -d @payload.json "$DISCORD_WEBHOOK_URL" \
             || echo "no se pudo notificar a Discord"
 
+      - name: Notificar a Telegram
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          STATUS: ${{ steps.build.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REL_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.tag }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then echo "sin telegram; skip"; exit 0; fi
+          if [ "$STATUS" = "success" ]; then
+            TEXT="$(printf '🚀 <b>DictateKeyboard %s</b> compilada y firmada.\n✅ APK lista para descargar: %s' "$TAG" "$REL_URL")"
+          else
+            TEXT="$(printf '❌ Falló la compilación de <b>%s</b>.\nRevisa el run: %s' "$TAG" "$RUN_URL")"
+          fi
+          jq -n --arg c "$TELEGRAM_CHAT_ID" --arg t "$TEXT" \
+            '{chat_id:$c, text:$t, parse_mode:"HTML"}' > tg_payload.json
+          curl -sf -X POST -H 'Content-Type: application/json' -d @tg_payload.json \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            || echo "no se pudo notificar a Telegram"
+
       - name: Actualizar estado (reintentos/éxito)
         if: always()
         env:
