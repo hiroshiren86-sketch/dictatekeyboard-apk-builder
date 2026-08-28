@@ -1,0 +1,16 @@
+# Nunca commitear material sensible
+*.keystore
+*.jks
+*.keyfile
+*_MegaBundle.zip
+secret*
+keystores/
+artifacts/
+project/
+
+# Basura de ejecución
+__pycache__/
+*.pyc
+decision.json
+*.apk
+*.log

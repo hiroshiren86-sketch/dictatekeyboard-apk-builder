@@ -1,0 +1,76 @@
+name: monitor-latest-tag
+
+# ============================================================
+# VIGILANTE — Detecta cuando DevEmperor/DictateKeyboard publica
+# un tag nuevo (mayor semver, ej: v2.11.0) y dispara el build
+# en Colab. Corre cada ~15 min con minutos desfasados para
+# evitar la congestión de cron de GitHub.
+# ============================================================
+
+on:
+  schedule:
+    - cron: "3,18,33,48 * * * *"
+  workflow_dispatch: {}   # botón "Run workflow" para pruebas manuales
+
+permissions:
+  contents: write   # para actualizar state/state.json
+  actions: write    # para disparar build.yml
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout del repo de automatización
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Detectar último tag y decidir
+        id: detect
+        run: |
+          python scripts/tag_monitor.py check > decision.json
+          cat decision.json
+          echo "should_build=$(jq -r .should_build decision.json)" >> "$GITHUB_OUTPUT"
+          echo "tag=$(jq -r .tag decision.json)"                 >> "$GITHUB_OUTPUT"
+          echo "sha=$(jq -r .sha decision.json)"                 >> "$GITHUB_OUTPUT"
+          echo "reason=$(jq -r .reason decision.json)"           >> "$GITHUB_OUTPUT"
+
+      - name: Notificar decisión
+        if: steps.detect.outputs.should_build != 'true'
+        run: echo "Sin cambios que compilar → $(cat decision.json | jq -r .reason)"
+
+      - name: Confirmar el tag con la API de GitHub (doble chequeo)
+        if: steps.detect.outputs.should_build == 'true'
+        run: |
+          TAG="${{ steps.detect.outputs.tag }}"
+          SHA_API=$(curl -sfL "https://api.github.com/repos/DevEmperor/DictateKeyboard/commits/${TAG}" | jq -r .sha)
+          echo "Tag ${TAG} resuelto por API → ${SHA_API}"
+          [ -n "$SHA_API" ] && [ "$SHA_API" != "null" ] || { echo "API no confirmó el tag; abortando por seguridad"; exit 1; }
+
+      - name: Guardar estado (commit) y disparar el build
+        if: steps.detect.outputs.should_build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.detect.outputs.tag }}
+          SHA: ${{ steps.detect.outputs.sha }}
+        run: |
+          git config user.name  "dictate-bot"
+          git config user.email "dictate-bot@users.noreply.github.com"
+          git add state/state.json
+          for i in 1 2 3; do
+            git commit -m "bot: encolar build ${TAG} (${SHA:0:12}) — ${{ steps.detect.outputs.reason }}" && break || git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          done
+          for i in 1 2 3; do
+            git push && break || { sleep 5; git pull --rebase origin "${GITHUB_REF_NAME}" || true; }
+          done
+          echo "Disparando build.yml para el tag ${TAG}…"
+          gh workflow run build.yml --ref "${GITHUB_REF_NAME}" \
+            -f tag="${TAG}" -f trigger=monitor

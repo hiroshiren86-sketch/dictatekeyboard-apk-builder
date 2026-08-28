@@ -1,0 +1,202 @@
+name: build-apk
+
+# ============================================================
+# CONSTRUCTOR NATIVO (GitHub Actions puro — sin Colab)
+# Réplica fiel de las Celdas 6, 9 y 10 del cuaderno:
+#   parches (Fragment 1.3.0 + Sherpa-ONNX + usuario)
+#   → gradlew {module}:assembleRelease con retry + auto-fix lint
+#   → zipalign + apksigner con TU keystore
+#   → Release con la APK + notificación a Discord
+#
+# Secrets usados (se llenan cuando llegue el MegaBundle):
+#   KEYSTORE_B64        keystore en base64
+#   KEYSTORE_PASSWORD   contraseña del keystore
+#   KEYSTORE_ALIAS      alias de la clave
+#   KEYSTORE_KEY_PASSWORD (opcional, si difiere del store)
+#   DISCORD_WEBHOOK_URL (opcional) webhook para notificaciones
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag a compilar (vacío = el mayor semver actual)"
+        default: ""
+      module:
+        description: "Módulo a compilar"
+        default: "app"
+        type: choice
+        options: [app, wear]
+      trigger:
+        description: "Quién dispara (monitor|manual)"
+        default: "manual"
+
+timeout-minutes: 150
+concurrency:
+  group: gradle-build
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # publicar el Release con la APK
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.secrets.outputs.ready }}
+    steps:
+      - id: secrets
+        env:
+          KS: ${{ secrets.KEYSTORE_B64 }}
+          PW: ${{ secrets.KEYSTORE_PASSWORD }}
+          AL: ${{ secrets.KEYSTORE_ALIAS }}
+        run: |
+          if [ -n "$KS" ] && [ -n "$PW" ] && [ -n "$AL" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Faltan los secrets del keystore (KEYSTORE_B64 / KEYSTORE_PASSWORD / KEYSTORE_ALIAS). Build omitido hasta completar el paso del MegaBundle en GUIA_SETUP.md."
+          fi
+
+  build:
+    needs: guard
+    if: needs.guard.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 140
+    steps:
+      - name: Checkout del repo de automatización (scripts + estado)
+        uses: actions/checkout@v4
+
+      - name: Resolver tag (input o mayor semver del repo fuente)
+        id: tag
+        run: |
+          TAG_IN="${{ github.event.inputs.tag }}"
+          if [ -n "$TAG_IN" ]; then
+            TAG="$TAG_IN"
+          else
+            read -r TAG _SHA <<< "$(python scripts/tag_monitor.py latest)"
+          fi
+          SHA_API=$(curl -sfL "https://api.github.com/repos/DevEmperor/DictateKeyboard/commits/${TAG}" | jq -r .sha)
+          if [ -z "$SHA_API" ] || [ "$SHA_API" = "null" ]; then
+            echo "La API no confirmó el tag ${TAG}"; exit 1
+          fi
+          echo "Compilando tag ${TAG} → commit ${SHA_API:0:12}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA_API" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout del proyecto fuente en ese tag
+        uses: actions/checkout@v4
+        with:
+          repository: DevEmperor/DictateKeyboard
+          ref: ${{ steps.tag.outputs.sha }}
+          path: project
+
+      - name: JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Aceptar licencias del Android SDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+
+      - name: Cache de Gradle
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ hashFiles('project/**/*.gradle*', 'project/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      - name: Aplicar parches (Fragment + Sherpa-ONNX + usuario)
+        run: |
+          python scripts/patch_project.py \
+            --project-root project \
+            --module "${{ github.event.inputs.module || 'app' }}" \
+            --patches-dir patches
+
+      - name: Restaurar keystore desde Secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          mkdir -p keystores
+          echo "$KEYSTORE_B64" | base64 -d > keystores/dictatekeyboard.keystore
+
+      - name: Compilar + firmar (Celdas 9 y 10)
+        id: build
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+        run: |
+          mkdir -p artifacts
+          python scripts/build_and_sign.py \
+            --project-root project \
+            --module "${{ github.event.inputs.module || 'app' }}" \
+            --task assembleRelease \
+            --keystore keystores/dictatekeyboard.keystore \
+            --ks-pass "$KEYSTORE_PASSWORD" \
+            --ks-alias "$KEYSTORE_ALIAS" \
+            --key-pass "${KEYSTORE_KEY_PASSWORD:-$KEYSTORE_PASSWORD}" \
+            --out-dir artifacts \
+            --tag "${{ steps.tag.outputs.tag }}"
+
+      - name: Subir artefacto del run (copia de seguridad)
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ steps.tag.outputs.tag }}
+          path: artifacts/*.apk
+          retention-days: 30
+
+      - name: Publicar Release con la APK
+        if: steps.build.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          NOTES="APK de DictateKeyboard **${TAG}** compilada y firmada automáticamente desde el tag upstream.
+          - Commit: \`${{ steps.tag.outputs.sha }}\`
+          - Módulo: \`${{ github.event.inputs.module || 'app' }}\`
+          - Firma: tu keystore (mismas firmas que el cuaderno de Colab)"
+          gh release create "$TAG" artifacts/*.apk \
+            --title "DictateKeyboard ${TAG}" --notes "$NOTES" \
+            || gh release upload "$TAG" artifacts/*.apk --clobber
+
+      - name: Notificar a Discord
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          STATUS: ${{ steps.build.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REL_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.tag }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then echo "sin webhook; skip"; exit 0; fi
+          if [ "$STATUS" = "success" ]; then
+            COLOR=3066993
+            TITLE="🚀 DictateKeyboard ${TAG} compilada y firmada"
+            DESC="✅ APK lista para descargar: ${REL_URL}"
+          else
+            COLOR=15158332
+            TITLE="❌ Falló la compilación de ${TAG}"
+            DESC="Revisa el run: ${RUN_URL}"
+          fi
+          jq -n --arg t "$TITLE" --arg d "$DESC" --argjson c "$COLOR" \
+            '{embeds:[{title:$t, description:$d, color:$c}]}' > payload.json
+          curl -sf -X POST -H 'Content-Type: application/json' -d @payload.json "$DISCORD_WEBHOOK_URL" \
+            || echo "no se pudo notificar a Discord"
+
+      - name: Actualizar estado (reintentos/éxito)
+        if: always()
+        env:
+          BUILD_TAG: ${{ steps.tag.outputs.tag }}
+          BUILD_OK: ${{ steps.build.outcome == 'success' }}
+        run: |
+          git config user.name  "dictate-bot"
+          git config user.email "dictate-bot@users.noreply.github.com"
+          python scripts/tag_monitor.py finish --status "$([ "$BUILD_OK" = "true" ] && echo success || echo failure)"
+          git add state/state.json
+          git commit -m "bot: build ${BUILD_TAG} → ${{ steps.build.outcome }}" || echo "sin cambios de estado"
+          for i in 1 2 3; do
+            git push && break || { sleep 5; git pull --rebase origin "${GITHUB_REF_NAME}" || true; }
+          done
