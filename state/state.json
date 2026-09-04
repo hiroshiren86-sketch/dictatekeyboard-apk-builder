@@ -1,13 +1,13 @@
 {
   "latest_tag": "v6.1.2",
   "latest_sha": "abd194bc9c84eba7fe7a355223d06dfa911c021b",
-  "build_status": "pending",
+  "build_status": "success",
   "build_tag": "v6.1.2",
   "retries": 0,
   "max_retries": 2,
   "last_check": "2026-09-04T17:20:07+00:00",
   "queued_at": "2026-09-04T17:20:07+00:00",
-  "finished_at": "2026-09-01T22:10:10+00:00",
+  "finished_at": "2026-09-04T17:28:42+00:00",
   "history": [
     {
       "at": "2026-08-28T01:15:54+00:00",
@@ -62,6 +62,13 @@
       "tag": "v6.1.2",
       "sha": "abd194bc9c84",
       "reason": "tag_nuevo v6.1.1 -> v6.1.2"
+    },
+    {
+      "at": "2026-09-04T17:28:42+00:00",
+      "event": "build_finished",
+      "tag": "v6.1.2",
+      "status": "success",
+      "retries": 0
     }
   ]
 }
