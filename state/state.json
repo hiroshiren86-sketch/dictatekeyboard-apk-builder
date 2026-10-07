@@ -3,11 +3,11 @@
   "latest_sha": "f77871bd97b9441b3315a1abe4ce22986937923a",
   "build_status": "failure",
   "build_tag": "v6.4.0",
-  "retries": 1,
+  "retries": 2,
   "max_retries": 2,
   "last_check": "2026-10-07T23:31:17+00:00",
   "queued_at": "2026-10-07T19:02:14+00:00",
-  "finished_at": "2026-10-07T19:05:17+00:00",
+  "finished_at": "2026-10-07T23:33:48+00:00",
   "history": [
     {
       "at": "2026-08-28T01:15:54+00:00",
@@ -117,6 +117,13 @@
       "event": "requeued",
       "tag": "v6.4.0",
       "reason": "reintento_1"
+    },
+    {
+      "at": "2026-10-07T23:33:48+00:00",
+      "event": "build_finished",
+      "tag": "v6.4.0",
+      "status": "failure",
+      "retries": 2
     }
   ]
 }
