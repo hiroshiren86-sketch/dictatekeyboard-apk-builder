@@ -5,7 +5,7 @@
   "build_tag": "v6.4.0",
   "retries": 1,
   "max_retries": 2,
-  "last_check": "2026-10-07T19:02:14+00:00",
+  "last_check": "2026-10-07T23:31:17+00:00",
   "queued_at": "2026-10-07T19:02:14+00:00",
   "finished_at": "2026-10-07T19:05:17+00:00",
   "history": [
@@ -111,6 +111,12 @@
       "tag": "v6.4.0",
       "status": "failure",
       "retries": 1
+    },
+    {
+      "at": "2026-10-07T23:31:17+00:00",
+      "event": "requeued",
+      "tag": "v6.4.0",
+      "reason": "reintento_1"
     }
   ]
 }
