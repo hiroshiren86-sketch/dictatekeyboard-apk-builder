@@ -61,7 +61,7 @@ jobs:
     needs: guard
     if: needs.guard.outputs.ready == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 140
+    timeout-minutes: 180
     steps:
       - name: Checkout del repo de automatización (scripts + estado)
         uses: actions/checkout@v4
@@ -112,6 +112,14 @@ jobs:
             --project-root project \
             --module "${{ github.event.inputs.module || 'app' }}" \
             --patches-dir patches
+
+      # Upstream ≥ v6.4.0 exige libdictate_bergamot.so (traducción offline,
+      # issue #424). La .so no viene en el repo fuente: se compila aquí con
+      # tools/bergamot/build-android.sh (NDK+CMake del SDK). Si el tag no la
+      # requiere, el script es un no-op.
+      - name: Compilar librería nativa Bergamot (upstream ≥ v6.4.0)
+        run: |
+          python scripts/build_native_libs.py --project-root project
 
       - name: Restaurar keystore desde Secrets
         env:
